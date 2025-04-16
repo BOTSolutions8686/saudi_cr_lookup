@@ -78,6 +78,7 @@ def convert_to_customer(docname):
         if not customer:
             frappe.msgprint(f"Creating new customer: {synced_company.company_title}")
             try:
+                # Create basic customer data
                 customer_data = frappe.get_doc({
                     'doctype': 'Customer',
                     'customer_name': synced_company.company_title,
@@ -86,37 +87,41 @@ def convert_to_customer(docname):
                     'territory': 'Saudi Arabia'
                 })
 
-                fieldnames = [df.fieldname for df in customer_data.meta.fields]
+                # Get all fieldnames from meta
+                customer_meta = frappe.get_meta('Customer')
+                customer_fieldnames = [df.fieldname for df in customer_meta.fields]
 
-                if 'custom_cr_number' in fieldnames:
+                # Set custom_cr_number if field exists
+                if 'custom_cr_number' in customer_fieldnames:
                     customer_data.custom_cr_number = synced_company.cr_number
 
                 customer = customer_data.insert().name
                 frappe.msgprint(f"Customer created: {customer}")
+
+                # Add to additional IDs if field exists
+                if 'custom_additional_ids' in customer_fieldnames:
+                    try:
+                        customer_data.append("custom_additional_ids", {
+                            "type_name": "Commercial Registration Number",
+                            "type_code": "CRN",
+                            "value": synced_company.cr_number
+                        })
+                        customer_data.save()
+                    except Exception as e:
+                        frappe.log_error(f"Failed to add CRN to child table: {str(e)}", "Child Table Error")
+
             except Exception as e:
                 frappe.log_error(f"Failed to create customer: {str(e)}", "Customer Creation Error")
                 frappe.throw(_("Error creating customer: ") + str(e))
 
             try:
-                if 'custom_additional_ids' in fieldnames:
-                    customer_data.append("custom_additional_ids", {
-                        "type_name": "Commercial Registration Number",
-                        "type_code": "CRN",
-                        "value": synced_company.cr_number
-                    })
-                    customer_data.save()
-            except Exception as e:
-                frappe.log_error(f"Failed to add CRN to child table: {str(e)}", "Child Table Error")
-
-            try:
+                # Create basic address data
                 customer_address = frappe.get_doc({
                     'doctype': 'Address',
                     'address_title': synced_company.company_title,
                     'address_line1': f"{synced_company.address_1} {synced_company.street or ''} {synced_company.building_number or ''}".strip(),
                     'address_line2': synced_company.address_2,
-                    'custom_building_number': synced_company.building_number,
                     'city': synced_company.city,
-                    'custom_area': synced_company.district,
                     'country': 'Saudi Arabia',
                     'state': synced_company.region_name,
                     'pincode': synced_company.post_code,
@@ -127,8 +132,21 @@ def convert_to_customer(docname):
                         }
                     ]
                 })
+
+                # Get Address meta to check for custom fields
+                address_meta = frappe.get_meta('Address')
+                address_fieldnames = [df.fieldname for df in address_meta.fields]
+
+                # Set custom fields if they exist
+                if 'custom_building_number' in address_fieldnames:
+                    customer_address.custom_building_number = synced_company.building_number
+                
+                if 'custom_area' in address_fieldnames:
+                    customer_address.custom_area = synced_company.district
+
                 customer_address.insert()
                 frappe.msgprint(f"Customer address created for: {customer}")
+
             except Exception as e:
                 frappe.log_error(f"Failed to create address: {str(e)}", "Address Creation Error")
                 frappe.throw(_("Error creating customer address: ") + str(e))
